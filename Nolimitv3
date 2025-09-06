@@ -1,219 +1,128 @@
--- // Services
+-- Services
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 
--- // Vars
+-- Vars
 local AutoKillEnabled = true -- always ON
 local autoSizeLoop
 local serverHopLoop
 local LockPosition = CFrame.new(-31.8626, 6.0588, 2087.8867)
 
--- // Whitelist usernames (players you want to avoid)
-local Whitelist = {
-"shhhh_892",
-"JJJoshligas",
-"david2937471",
-"Larry028372"
-}
-
--- // Functions
+-- Functions
 local function EquipPunch()
-local tool = LocalPlayer.Backpack:FindFirstChild("Punch")
-if tool then
-LocalPlayer.Character:FindFirstChildOfClass("Humanoid"):EquipTool(tool)
-end
+    local tool = LocalPlayer.Backpack:FindFirstChild("Punch")
+    if tool then
+        LocalPlayer.Character:FindFirstChildOfClass("Humanoid"):EquipTool(tool)
+    end
 end
 
 local function DoPunch()
-local char = LocalPlayer.Character
-if not char then return end
-local punch = LocalPlayer.Backpack:FindFirstChild("Punch") or char:FindFirstChild("Punch")
-if punch then
-if punch:FindFirstChild("attackTime") then
-punch.attackTime.Value = 0.001
-end
-for i = 1, 5 do
-pcall(function() punch:Activate() end)
-end
-end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local punch = LocalPlayer.Backpack:FindFirstChild("Punch") or char:FindFirstChild("Punch")
+    if punch then
+        if punch:FindFirstChild("attackTime") then
+            punch.attackTime.Value = 0.001
+        end
+        for i = 1, 5 do pcall(function() punch:Activate() end) end
+    end
 end
 
--- No Animation Punch
-local function DoPunchNoAnim()
-local player = LocalPlayer
-local char = player.Character
-if not char then return end
-
--- Make sure punch tool is equipped  
-local punchTool = player.Backpack:FindFirstChild("Punch") or char:FindFirstChild("Punch")  
-if punchTool then  
-    if punchTool.Parent ~= char then  
-        punchTool.Parent = char -- Equip automatically  
-    end  
-    -- Fire no-animation punches  
-    player.muscleEvent:FireServer("punch", "rightHand")  
-    player.muscleEvent:FireServer("punch", "leftHand")  
-end
-
-end
-
--- AutoKill Loop (includes normal punch + no anim punch)
 local function AutoKillLoop(lockPosition)
-task.spawn(function()
-while AutoKillEnabled do
-local char = LocalPlayer.Character
-if char and char:FindFirstChild("HumanoidRootPart") then
-if lockPosition then
-char.HumanoidRootPart.CFrame = lockPosition
-end
-EquipPunch()
-DoPunch()        -- normal punch
-DoPunchNoAnim()  -- no animation punch
-
-local rHand = char:FindFirstChild("RightHand")  
-            local lHand = char:FindFirstChild("LeftHand")  
-
-            if rHand and lHand then  
-                for _, target in ipairs(Players:GetPlayers()) do  
-                    if target ~= LocalPlayer and target.Character then  
-                        -- skip friends  
-                        if not pcall(function()  
-                            return LocalPlayer:IsFriendsWith(target.UserId)  
-                        end) or not LocalPlayer:IsFriendsWith(target.UserId) then  
-                            local root = target.Character:FindFirstChild("HumanoidRootPart")  
-                            if root then  
-                                firetouchinterest(rHand, root, 1)  
-                                firetouchinterest(lHand, root, 1)  
-                                firetouchinterest(rHand, root, 0)  
-                                firetouchinterest(lHand, root, 0)  
-                            end  
-                        end  
-                    end  
-                end  
-            end  
-        end  
-        task.wait(0.01)  
-    end  
-end)
-
+    task.spawn(function()
+        while AutoKillEnabled do
+            local char = LocalPlayer.Character
+            if char and char:FindFirstChild("HumanoidRootPart") then
+                if lockPosition then
+                    char.HumanoidRootPart.CFrame = lockPosition
+                end
+                EquipPunch()
+                DoPunch()
+                local rHand = char:FindFirstChild("RightHand")
+                local lHand = char:FindFirstChild("LeftHand")
+                if rHand and lHand then
+                    for _, target in ipairs(Players:GetPlayers()) do
+                        if target ~= LocalPlayer and target.Character then
+                            -- ✅ Skip friends
+                            if not pcall(function()
+                                return LocalPlayer:IsFriendsWith(target.UserId)
+                            end) or not LocalPlayer:IsFriendsWith(target.UserId) then
+                                local root = target.Character:FindFirstChild("HumanoidRootPart")
+                                if root then
+                                    firetouchinterest(rHand, root, 1)
+                                    firetouchinterest(lHand, root, 1)
+                                    firetouchinterest(rHand, root, 0)
+                                    firetouchinterest(lHand, root, 0)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            task.wait(0.01)
+        end
+    end)
 end
 
--- Auto Size NAN loop
 local function StartAutoSizeNaN()
-if autoSizeLoop then return end
-autoSizeLoop = task.spawn(function()
-while AutoKillEnabled do
-pcall(function()
-ReplicatedStorage.rEvents.changeSpeedSizeRemote:InvokeServer("changeSize", 0/0)
-end)
-task.wait()
-end
-end)
+    if autoSizeLoop then return end
+    autoSizeLoop = task.spawn(function()
+        while AutoKillEnabled do
+            pcall(function()
+                ReplicatedStorage.rEvents.changeSpeedSizeRemote:InvokeServer("changeSize", 0/0)
+            end)
+            task.wait()
+        end
+    end)
 end
 
 local function StopAutoSizeNaN()
-if autoSizeLoop then
-task.cancel(autoSizeLoop)
-autoSizeLoop = nil
-end
-end
-
--- // Server hop function
-local function HopServer()
-pcall(function()
-local servers = {}
-local cursor = ""
-local gameId = 3623096087
-
-repeat    
-        local response = game:HttpGet(  
-            "https://games.roblox.com/v1/games/"..gameId.."/servers/Public?sortOrder=Asc&limit=100"..(cursor ~= "" and "&cursor="..cursor or "")  
-        )    
-        local data = HttpService:JSONDecode(response)    
-        for _, server in ipairs(data.data) do    
-            if server.playing >= 15 and server.playing <= 20 and server.id ~= game.JobId then    
-                print("[INFO] Hopping to server:", server.id)  
-                TeleportService:TeleportToPlaceInstance(gameId, server.id, LocalPlayer)    
-                return    
-            end    
-        end    
-        cursor = data.nextPageCursor or ""    
-    until cursor == "" or not cursor    
-end)
-
+    if autoSizeLoop then
+        task.cancel(autoSizeLoop)
+        autoSizeLoop = nil
+    end
 end
 
--- // Server hop loop
+-- Server hop loop
 local function StartServerHopLoop()
-if serverHopLoop then return end
-serverHopLoop = task.spawn(function()
-while AutoKillEnabled do
-task.wait(60) -- wait full 60 seconds before hopping
-HopServer()
-end
-end)
+    if serverHopLoop then return end
+    serverHopLoop = task.spawn(function()
+        while AutoKillEnabled do
+            task.wait(60)
+            pcall(function()
+                local servers = {}
+                local cursor = ""
+                local gameId = 3623096087
+
+                repeat
+                    local response = game:HttpGet(
+                        "https://games.roblox.com/v1/games/"..gameId.."/servers/Public?sortOrder=Asc&limit=100"..(cursor ~= "" and "&cursor="..cursor or "")
+                    )
+                    local data = HttpService:JSONDecode(response)
+                    for _, server in ipairs(data.data) do
+                        if server.playing >= 15 and server.playing <= 20 and server.id ~= game.JobId then
+                            TeleportService:TeleportToPlaceInstance(gameId, server.id, LocalPlayer)
+                            return
+                        end
+                    end
+                    cursor = data.nextPageCursor or ""
+                until cursor == "" or not cursor
+            end)
+        end
+    end)
 end
 
 local function StopServerHopLoop()
-if serverHopLoop then
-task.cancel(serverHopLoop)
-serverHopLoop = nil
-end
-end
-
--- // Whitelist check
-Players.PlayerAdded:Connect(function(player)
-if table.find(Whitelist, player.Name) then
-print("[WHITELIST DETECTED] "..player.Name.." joined. Hopping server...")
-HopServer()
-end
-end)
-
-for _, player in ipairs(Players:GetPlayers()) do
-if table.find(Whitelist, player.Name) then
-print("[WHITELIST DETECTED] "..player.Name.." already in server. Hopping...")
-HopServer()
-end
+    if serverHopLoop then
+        task.cancel(serverHopLoop)
+        serverHopLoop = nil
+    end
 end
 
--- // Restart AutoKill on respawn
-LocalPlayer.CharacterAdded:Connect(function(char)
-char:WaitForChild("HumanoidRootPart")
-print("[INFO] Character respawned, restarting AutoKill...")
-
-task.delay(1, function()  
-    if AutoKillEnabled then  
-        EquipPunch()  
-    end  
-end)  
-
-if AutoKillEnabled then  
-    AutoKillLoop(LockPosition)  
-end
-
-end)
-
-TeleportService.TeleportInitFailed:Connect(function(_, result)
-warn("[WARN] Teleport failed:", result)
-end)
-
--- // Auto start
+-- 🔥 Auto start as soon as executed
 AutoKillLoop(LockPosition)
 StartAutoSizeNaN()
 StartServerHopLoop()
-
--- // GUI Extra
-Tabs.Killing:CreateButton({
-Title = "Fast Punch",
-Callback = function()
-local player = game.Players.LocalPlayer
-local punch = player.Backpack:FindFirstChild("Punch") or (game.Workspace:FindFirstChild(player.Name) and game.Workspace[player.Name]:FindFirstChild("Punch"))
-if punch and punch:FindFirstChild("attackTime") then
-punch.attackTime.Value = 0.065
-end
-end
-})
-

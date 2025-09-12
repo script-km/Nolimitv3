@@ -2,59 +2,72 @@
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local TeleportService = game:GetService("TeleportService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 
--- Vars
-local AutoKillEnabled = false
-local serverHopLoop
-local autoKillThread
+-- Wait for LocalPlayer (safety)
+if not LocalPlayer then
+    Players.PlayerAdded:Wait()
+    LocalPlayer = Players.LocalPlayer
+end
 
--- Functions
+-- Vars (restored to auto-on by default)
+local AutoKillEnabled = true
+local serverHopThread
+local autoKillThread
+local antiKnockbackEnabled = false
+local BODY_VEL_NAME = "NoKnockback_BV"
+
+-- Utility: safe equip
 local function EquipPunch()
-    local tool = LocalPlayer.Backpack:FindFirstChild("Punch")
-    if tool then
-        LocalPlayer.Character:FindFirstChildOfClass("Humanoid"):EquipTool(tool)
+    local ok, humanoid = pcall(function()
+        return LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    end)
+    local tool = LocalPlayer.Backpack and LocalPlayer.Backpack:FindFirstChild("Punch")
+    if tool and humanoid then
+        pcall(function() humanoid:EquipTool(tool) end)
     end
 end
 
+-- Utility: safe activate
 local function DoPunch()
     local char = LocalPlayer.Character
     if not char then return end
-    local punch = LocalPlayer.Backpack:FindFirstChild("Punch") or char:FindFirstChild("Punch")
+    local punch = (LocalPlayer.Backpack and LocalPlayer.Backpack:FindFirstChild("Punch")) or char:FindFirstChild("Punch")
     if punch then
         if punch:FindFirstChild("attackTime") then
-            punch.attackTime.Value = 0.001
+            pcall(function() punch.attackTime.Value = 0.001 end)
         end
-        for i = 1, 5 do pcall(function() punch:Activate() end) end
+        for i = 1, 5 do
+            pcall(function() punch:Activate() end)
+        end
     end
 end
 
+-- AutoKill loop
 local function AutoKillLoop()
     if autoKillThread then return end
     autoKillThread = task.spawn(function()
+        print("[AutoKill] started")
         while AutoKillEnabled do
             local char = LocalPlayer.Character
             if char and char:FindFirstChild("HumanoidRootPart") then
                 EquipPunch()
                 DoPunch()
-
                 local rHand = char:FindFirstChild("RightHand")
                 local lHand = char:FindFirstChild("LeftHand")
-
                 if rHand and lHand then
                     for _, target in ipairs(Players:GetPlayers()) do
                         if target ~= LocalPlayer and target.Character then
-                            -- ✅ Skip friends
-                            if not pcall(function()
-                                return LocalPlayer:IsFriendsWith(target.UserId)
-                            end) or not LocalPlayer:IsFriendsWith(target.UserId) then
+                            local ok, isFriend = pcall(function() return LocalPlayer:IsFriendsWith(target.UserId) end)
+                            if (not ok) or (not isFriend) then
                                 local root = target.Character:FindFirstChild("HumanoidRootPart")
                                 if root then
-                                    firetouchinterest(rHand, root, 1)
-                                    firetouchinterest(lHand, root, 1)
-                                    firetouchinterest(rHand, root, 0)
-                                    firetouchinterest(lHand, root, 0)
+                                    pcall(function()
+                                        firetouchinterest(rHand, root, 1)
+                                        firetouchinterest(lHand, root, 1)
+                                        firetouchinterest(rHand, root, 0)
+                                        firetouchinterest(lHand, root, 0)
+                                    end)
                                 end
                             end
                         end
@@ -63,84 +76,126 @@ local function AutoKillLoop()
             end
             task.wait(0.01)
         end
+        print("[AutoKill] stopped")
+        autoKillThread = nil
     end)
 end
 
 local function StopAutoKillLoop()
     if autoKillThread then
-        task.cancel(autoKillThread)
+        pcall(function() task.cancel(autoKillThread) end)
         autoKillThread = nil
     end
 end
 
 -- Server hop loop
 local function StartServerHopLoop()
-    if serverHopLoop then return end
-    serverHopLoop = task.spawn(function()
+    if serverHopThread then return end
+    serverHopThread = task.spawn(function()
+        print("[ServerHop] started")
         while AutoKillEnabled do
             task.wait(60)
             pcall(function()
-                local servers = {}
                 local cursor = ""
                 local gameId = 3623096087
-
                 repeat
-                    local response = game:HttpGet(
-                        "https://games.roblox.com/v1/games/"..gameId.."/servers/Public?sortOrder=Asc&limit=100"..(cursor ~= "" and "&cursor="..cursor or "")
-                    )
+                    local url = "https://games.roblox.com/v1/games/"..gameId.."/servers/Public?sortOrder=Asc&limit=100"..(cursor ~= "" and "&cursor="..cursor or "")
+                    local response = game:HttpGet(url)
                     local data = HttpService:JSONDecode(response)
-
-                    for _, server in ipairs(data.data) do
+                    for _, server in ipairs(data.data or {}) do
                         if server.playing >= 15 and server.playing <= 20 and server.id ~= game.JobId then
                             TeleportService:TeleportToPlaceInstance(gameId, server.id, LocalPlayer)
                             return
                         end
                     end
-
                     cursor = data.nextPageCursor or ""
                 until cursor == "" or not cursor
             end)
         end
+        print("[ServerHop] stopped")
+        serverHopThread = nil
     end)
 end
 
 local function StopServerHopLoop()
-    if serverHopLoop then
-        task.cancel(serverHopLoop)
-        serverHopLoop = nil
+    if serverHopThread then
+        pcall(function() task.cancel(serverHopThread) end)
+        serverHopThread = nil
     end
 end
 
--- 🔥 Anti Knockback toggle + AutoKill integration
-AddSwitch("Anti Knockback", function(Value)
-    local playerName = LocalPlayer.Name
-    local rootPart = workspace:FindFirstChild(playerName) and workspace[playerName]:FindFirstChild("HumanoidRootPart")
+-- Anti-knockback helpers
+local function applyBodyVelocityToRoot(rootPart)
+    if not rootPart then return end
+    if rootPart:FindFirstChild(BODY_VEL_NAME) then return end
+    local bv = Instance.new("BodyVelocity")
+    bv.Name = BODY_VEL_NAME
+    bv.MaxForce = Vector3.new(100000, 0, 100000)
+    bv.Velocity = Vector3.new(0, 0, 0)
+    bv.P = 1250
+    bv.Parent = rootPart
+end
 
-    if Value then
-        if rootPart then
-            local bodyVelocity = Instance.new("BodyVelocity")
-            bodyVelocity.MaxForce = Vector3.new(100000, 0, 100000)
-            bodyVelocity.Velocity = Vector3.new(0, 0, 0)
-            bodyVelocity.P = 1250
-            bodyVelocity.Parent = rootPart
-        end
+local function removeBodyVelocityFromRoot(rootPart)
+    if not rootPart then return end
+    local existing = rootPart:FindFirstChild(BODY_VEL_NAME)
+    if existing then
+        pcall(function() existing:Destroy() end)
+    end
+end
 
-        -- ✅ Enable AutoKill + ServerHop
-        AutoKillEnabled = true
-        AutoKillLoop()
-        StartServerHopLoop()
+local function enableAntiKnockback()
+    antiKnockbackEnabled = true
+    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local root = char:WaitForChild("HumanoidRootPart")
+    applyBodyVelocityToRoot(root)
+    -- start autokill + serverhop when enabling anti-knockback
+    AutoKillEnabled = true
+    AutoKillLoop()
+    StartServerHopLoop()
+    print("[AntiKB] enabled")
+end
 
-    else
-        if rootPart then
-            local existingVelocity = rootPart:FindFirstChild("BodyVelocity")
-            if existingVelocity and existingVelocity.MaxForce == Vector3.new(100000, 0, 100000) then
-                existingVelocity:Destroy()
-            end
-        end
+local function disableAntiKnockback()
+    antiKnockbackEnabled = false
+    local char = LocalPlayer.Character
+    if char then
+        local root = char:FindFirstChild("HumanoidRootPart")
+        removeBodyVelocityFromRoot(root)
+    end
+    AutoKillEnabled = false
+    StopAutoKillLoop()
+    StopServerHopLoop()
+    print("[AntiKB] disabled")
+end
 
-        -- ❌ Disable AutoKill + ServerHop
-        AutoKillEnabled = false
-        StopAutoKillLoop()
-        StopServerHopLoop()
+-- Reapply on respawn if anti-knockback active
+LocalPlayer.CharacterAdded:Connect(function(char)
+    if antiKnockbackEnabled then
+        task.wait(0.1)
+        local root = char:WaitForChild("HumanoidRootPart")
+        applyBodyVelocityToRoot(root)
     end
 end)
+
+-- UI switch integration (use AddSwitch if available, otherwise create a global toggle)
+if type(AddSwitch) == "function" then
+    AddSwitch("Anti Knockback", function(Value)
+        if Value then
+            enableAntiKnockback()
+        else
+            disableAntiKnockback()
+        end
+    end)
+else
+    print("[Warning] AddSwitch not found. You can toggle with _G.ToggleAntiKnockback(true/false)")
+    _G.ToggleAntiKnockback = function(val)
+        if val then enableAntiKnockback() else disableAntiKnockback() end
+    end
+end
+
+-- Auto-start like your original script (keeps original behaviour)
+if AutoKillEnabled then
+    AutoKillLoop()
+    StartServerHopLoop()
+end

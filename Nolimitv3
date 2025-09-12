@@ -1,1 +1,154 @@
-loadstring(game:HttpGet("https://pastefy.app/K9spqhKM/raw"))()
+-- Services
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local TeleportService = game:GetService("TeleportService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+
+-- Vars
+local AutoKillEnabled = true -- always ON
+local serverHopLoop
+_G.AutoTPSecretIsland = false
+_G.AntiKnockback = false
+
+-- Functions
+local function EquipPunch()
+    local tool = LocalPlayer.Backpack:FindFirstChild("Punch")
+    if tool then
+        LocalPlayer.Character:FindFirstChildOfClass("Humanoid"):EquipTool(tool)
+    end
+end
+
+local function DoPunch()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local punch = LocalPlayer.Backpack:FindFirstChild("Punch") or char:FindFirstChild("Punch")
+    if punch then
+        if punch:FindFirstChild("attackTime") then
+            punch.attackTime.Value = 0.001
+        end
+        for i = 1, 5 do pcall(function() punch:Activate() end) end
+    end
+end
+
+-- 🔥 Auto Teleport to Secret Island
+local function autoTPSecretIsland()
+    while _G.AutoTPSecretIsland and AutoKillEnabled do
+        task.wait(1)
+        local player = LocalPlayer
+        if player and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            player.Character.HumanoidRootPart.CFrame = CFrame.new(1947, 2, 6191)
+        end
+    end
+end
+
+-- 🛡️ Anti Knockback
+local function EnableAntiKnockback()
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        local rootPart = char:FindFirstChild("HumanoidRootPart")
+        if not rootPart:FindFirstChild("BodyVelocity") then
+            local bodyVelocity = Instance.new("BodyVelocity")
+            bodyVelocity.MaxForce = Vector3.new(100000, 0, 100000)
+            bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+            bodyVelocity.P = 1250
+            bodyVelocity.Parent = rootPart
+        end
+    end
+end
+
+local function DisableAntiKnockback()
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        local rootPart = char:FindFirstChild("HumanoidRootPart")
+        local existingVelocity = rootPart:FindFirstChild("BodyVelocity")
+        if existingVelocity and existingVelocity.MaxForce == Vector3.new(100000, 0, 100000) then
+            existingVelocity:Destroy()
+        end
+    end
+end
+
+-- Auto Kill Loop
+local function AutoKillLoop()
+    task.spawn(function()
+        -- ✅ Auto enable features when AutoKill starts
+        _G.AutoTPSecretIsland = true
+        task.spawn(autoTPSecretIsland)
+
+        _G.AntiKnockback = true
+        EnableAntiKnockback()
+
+        while AutoKillEnabled do
+            local char = LocalPlayer.Character
+            if char and char:FindFirstChild("HumanoidRootPart") then
+                EquipPunch()
+                DoPunch()
+
+                local rHand = char:FindFirstChild("RightHand")
+                local lHand = char:FindFirstChild("LeftHand")
+                if rHand and lHand then
+                    for _, target in ipairs(Players:GetPlayers()) do
+                        if target ~= LocalPlayer and target.Character then
+                            if not pcall(function()
+                                return LocalPlayer:IsFriendsWith(target.UserId)
+                            end) or not LocalPlayer:IsFriendsWith(target.UserId) then
+                                local root = target.Character:FindFirstChild("HumanoidRootPart")
+                                if root then
+                                    firetouchinterest(rHand, root, 1)
+                                    firetouchinterest(lHand, root, 1)
+                                    firetouchinterest(rHand, root, 0)
+                                    firetouchinterest(lHand, root, 0)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            task.wait(0.01)
+        end
+
+        -- 🛑 When AutoKill stops, also disable AntiKnockback & AutoTP
+        _G.AutoTPSecretIsland = false
+        _G.AntiKnockback = false
+        DisableAntiKnockback()
+    end)
+end
+
+-- Server hop loop
+local function StartServerHopLoop()
+    if serverHopLoop then return end
+    serverHopLoop = task.spawn(function()
+        while AutoKillEnabled do
+            task.wait(60)
+            pcall(function()
+                local servers = {}
+                local cursor = ""
+                local gameId = 3623096087
+                repeat
+                    local response = game:HttpGet(
+                        "https://games.roblox.com/v1/games/"..gameId.."/servers/Public?sortOrder=Asc&limit=100"..(cursor ~= "" and "&cursor="..cursor or "")
+                    )
+                    local data = HttpService:JSONDecode(response)
+                    for _, server in ipairs(data.data) do
+                        if server.playing >= 15 and server.playing <= 20 and server.id ~= game.JobId then
+                            TeleportService:TeleportToPlaceInstance(gameId, server.id, LocalPlayer)
+                            return
+                        end
+                    end
+                    cursor = data.nextPageCursor or ""
+                until cursor == "" or not cursor
+            end)
+        end
+    end)
+end
+
+local function StopServerHopLoop()
+    if serverHopLoop then
+        task.cancel(serverHopLoop)
+        serverHopLoop = nil
+    end
+end
+
+-- 🔥 Auto start as soon as executed
+AutoKillLoop()
+StartServerHopLoop()
